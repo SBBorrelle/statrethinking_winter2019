@@ -1,0 +1,68 @@
+---
+title: "Chapter 3"
+author: "S Borrelle"
+date: "6/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+To repeat the structure of common examples, suppose there is a blood test that correctly detects vampirism 95% of the time. In more precise and mathematical notation, Pr(positive test result|vampire) = 0.95. It’s a very accurate test, nearly always catching real vampires. It also make mistakes, though, in the form of false positives. One percent of the time, it incorrectly diagnoses normal people as vampires, Pr(positive test result|mortal) = 0.01. The final bit of information we are told is that vampires are rather rare, being only 0.1% of the population, implying Pr(vampire) = 0.001. Suppose now that someone tests positive for vampirism. What’s the probability that he or she is a bloodsucking immortal?
+The correct approach is just to use Bayes’ theorem to invert the probability, to compute Pr(vampire|positive). The calculation can be presented as:
+Pr(vampire|positive) = Pr(positive|vampire) Pr(vampire) Pr(positive)
+where Pr(positive) is the average probability of a positive test result, that is, 
+Pr(positive) = Pr(positive|vampire) Pr(vampire)
+        + Pr(positive|mortal)(1 − Pr(vampire))
+```{r}
+Prob_pos_vamp <-  0.95
+Prob_pos_mortal <- 0.01
+prob_vamp <- 0.001
+
+Prob_pos <-  Prob_pos_vamp * prob_vamp + Prob_pos_mortal*(1-prob_vamp)
+Pr_vamp_pos <- Prob_pos_vamp * prob_vamp / Prob_pos
+
+#or 8.7% chanve that the suspect is actually a vampire
+```
+compute the posterior for the globe tossing model, using grid approximation. Remember, the posterior here means the probability of p conditional on the data.
+```{r}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prob_p <- rep( 1 , 1000 )
+prob_data <- dbinom( 6 , size=9 , prob=p_grid )
+posterior <- prob_data * prob_p
+posterior <- posterior / sum(posterior)
+```
+Imagine the posterior is a bucket full of parameter values, numbers such as 0.1, 0.7, 0.5, 1, etc. Within the bucket, each value exists in proportion to its posterior probability, such that values near the peak are much more common than those in the tails. We’re going to scoop out 10,000 values from the bucket. Provided the bucket is well mixed, the resulting samples will have the same proportions as the exact posterior density. Therefore the individual values of p will appear in our samples in proportion to the posterior plausibility of each value.
+```{r}
+samples <- sample( p_grid , prob=posterior , size=1e4 , replace=TRUE)
+plot(samples)
+library(rethinking)
+dens(samples)
+
+#add up the posterior probability where p<0.5
+sum(posterior[ p_grid <0.5])
+#find the frequency of parameter values below 0.5
+sum(samples <0.5)/1e4
+#Using the same approach, you can ask how much posterior probability lies between 0.5 and 0.75
+sum(samples >0.5 & samples <0.75)/1e4 # about 60% of the posterio probability lies between .5 and 0.75
+#Suppose for example you want to know the boundaries of the lower 80% posterior probabil- ity. You know this interval starts at p = 0. To find out where it stops, think of the samples as data and ask where the 80th percentile lies
+quantile(samples, 0.8)
+#Similarly, the middle 80% interval lies between the 10th percentile and the 90th percentile. These boundaries are found using the same approach:
+quantile(samples, c(0.1, 0.9))
+```
+percentile intervals (PI). These intervals do a good job of communicating the shape of a distribution, as long as the distribution isn’t too asymmetrical. But in terms of supporting inferences about which parameters are consistent with the data, they are not perfect
+```{r}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep(1,1000)
+likelihood <- dbinom( 3 , size=3 , prob=p_grid )
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+samples <- sample( p_grid , size=1e4 , replace=TRUE , prob=posterior )
+#calcualte the 50% percentile confidence 
+ PI( samples , prob=0.5 )
+```
+highest posterior density interval (HPDI).51 The HPDI is the narrowest interval containing the specified probability mass. If you think about it, there must be an infinite number of posterior intervals with the same mass. But if you want an interval that best represents the parameter values most consistent with the data, then you want the densest of these intervals. That’s what the HPDI is.
+```{r}
+HPDI(samples, prob=0.5)
+```

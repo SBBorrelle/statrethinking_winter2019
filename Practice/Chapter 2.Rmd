@@ -1,0 +1,308 @@
+---
+title: "Week_1 - Chapter 2"
+author: "S Borrelle"
+date: "6/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages(c("coda","mvtnorm","devtools"))
+library(devtools)
+getOption("download.file.method") #if "curl" then run this
+options("download.file.method" = "libcurl")
+devtools::install_github("rmcelreath/rethinking",ref="Experimental")
+```
+
+1. Grid approximation. One of the simplest conditioning techniques is grid approximation. While most parameters are continuous, capable of taking on an infinite number of values, it turns out that we can achieve an excellent approximation of the continuous posterior distribution by considering only a finite grid of parameter values. At any particular value of a parameter, p′, it’s a simple matter to compute the posterior probability: just multiply the prior probability of p′ by the likelihood at p′. Repeating this procedure for each value in the grid generates an approximate picture of the exact posterior distribution. This procedure is called grid approximation.
+Here is the recipe:
+(1) Define the grid. This means you decide how many points to use in estimating the posterior, and then you make a list of the parameter values on the grid.
+(2) Compute the value of the prior at each parameter value on the grid.
+(3) Compute the likelihood at each parameter value.
+(4) Computetheunstandardizedposteriorateachparametervalue,bymultiplyingthe
+prior by the likelihood.
+(5) Finally, standardize the posterior, by dividing each value by the sum of all values.
+```{r}
+# define grid
+p_grid <- seq( from=0 , to=1 , length.out=20 )
+# define prior
+prior <- rep( 1 , 20 )
+# compute likelihood at each value in grid
+likelihood <- dbinom( 6 , size=9 , prob=p_grid )
+# compute product of likelihood and prior
+unstd.posterior <- likelihood * prior
+# standardize the posterior, so it sums to 1
+posterior <- unstd.posterior / sum(unstd.posterior)
+#plot the posterior
+plot( p_grid , posterior , type="b" ,
+    xlab="probability of water" , ylab="posterior probability" )
+mtext( "20 points" )
+#Now to replicate the different priors in Figure 2.5, try these lines of code—one at a time—for the prior grid:
+prior <- ifelse( p_grid < 0.5 , 0 , 1 ) #triming the grid approximation
+prior <- exp( -5*abs( p_grid - 0.5 ) )
+
+#quick mcmc example
+n_samples <- 1000
+p <- rep( NA , n_samples )
+p[1] <- 0.5
+W <- 6
+L <- 3
+for ( i in 2:n_samples ) {
+    p_new <- rnorm( 1 , p[i-1] , 0.1 )
+    if ( p_new < 0 ) p_new <- abs( p_new )
+    if ( p_new > 1 ) p_new <- 2 - p_new
+    q0 <- dbinom( W , W+L , p[i-1] )
+    q1 <- dbinom( W , W+L , p_new )
+    p[i] <- ifelse( runif(1) < q1/q0 , p_new , p[i-1] )
+}
+dens( p , xlim=c(0,1) )
+curve( dbeta( x , W+1 , L+1 ) , lty=2 , add=TRUE )
+```
+2. Quadratic approximation is very inexpensive, at least compared to grid approximation and MCMC (discussed next). The procedure contains two steps.
+(1) Find the posterior mode. This is usually accomplished by some optimization algorithm, a procedure that virtually “climbs” the posterior distribution, as if it were a mountain. The golem doesn’t know where the peak is, but it does know the slope under its feet. There are many well-developed optimization procedures, most of them more clever than simple hill climbing. But all of them try to find peaks.
+(2) Once you find the peak of the posterior, you must estimate the curvature near the peak. This curvature is sufficient to compute a quadratic approximation of the entire posterior distribution. In some cases, these calculations can be done analytically, but usually your computer uses some numerical technique instead.
+To compute the quadratic approximation to the globe tossing data:
+```{r}
+library(rethinking)
+#To use map, you provide a formula, a list of data, and a list of start values for the parameters.
+globe.qa <- map(
+    alist(
+        w ~ dbinom(9,p) ,  # binomial likelihood
+        p ~ dunif(0,1)     # uniform prior
+), data=list(w=6) )
+# display summary of quadratic approximation
+precis( globe.qa ) 
+
+#The curvature is labeled “Std- Dev”, This value is the standard deviation of the posterior distribution, while the mean value is its peak
+
+# analytical calculation
+w <- 6
+n <- 9
+curve( dbeta( x , w+1 , n-w+1 ) , from=0 , to=1 )
+# quadratic approximation
+curve( dnorm( x , 0.67 , 0.16 ) , lty=2 , add=TRUE )
+#The solid curve is the analytical posterior and the dashed curve is the quadratic approximation. The black curve does alright on its left side, but looks pretty bad on its right side. It even assigns positive probability to p = 1, which we know is impossible, since we saw at least one land sample
+```
+
+Suppose the globe tossing data had turned out to be 8 water in 15 tosses. Construct the posterior distribution, using grid approximation. Use the same flat prior as before.
+```{r, echo=TRUE}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- rep( 1 , 1000 )
+prob_data <- dbinom( 8 , size=15 , prob=p_grid )
+posterior <- prob_data * prior
+posterior <- posterior / sum(posterior)
+set.seed(100)
+samples <- sample( p_grid , prob=posterior , size=1e4 , replace=TRUE)
+dens( samples , xlab="p" , xlim=c(0,1) , ylim=c(0,6) )
+dens( samples2 , add=TRUE , lty=2 )
+abline( v=0.53 , col="red" )
+```
+2. Start over in 1, but now use a prior that is zero below p = 0.5 and a con- stant above p = 0.5. This corresponds to prior information that a majority of the Earth’s surface is water. What difference does the better prior make? If it helps, compare posterior distributions (using both priors) to the true value p = 0.7.
+```{r, echo=TRUE}
+p_grid <- seq( from=0 , to=1 , length.out=1000 )
+prior <- c( rep( 0 , 500 ) , rep( 1 , 500 ) )
+prob_data <- dbinom( 8 , size=15 , prob=p_grid )
+posterior <- prob_data * prior
+posterior <- posterior / sum(posterior)
+set.seed(100)
+samples2 <- sample( p_grid , prob=posterior , size=1e4 , replace=TRUE )
+# The posterior mean should be about 0.61 and the 99% interval 0.50 to 0.82. This prior yields a posterior with more mass around the true value of 0.7. This is probably easier to see in a plot:
+dens( samples , xlab="p" , xlim=c(0,1) , ylim=c(0,6) )
+dens( samples2 , add=TRUE , lty=2 )
+abline( v=0.7 , col="red" )
+```
+
+Suppose you want to estimate the Earth’s proportion of water very precisely. Specifically, you want the 99% percentile interval of the posterior distribution of p to be only 0.05 wide. This means the distance be- tween the upper and lower bound of the interval should be 0.05. How many times will you have to toss the globe to do this? 
+```{r}
+f <- function( N ) {
+  p_true <- 0.7
+  W <- rbinom( 1 , size=N , prob=p_true )
+  p_grid <- seq( from=0 , to=1 , length.out=1000 )
+  prior <- rep( 1 , 1000 )
+  prob_data <- dbinom( W , size=N , prob=p_grid )
+  posterior <- prob_data * prior
+  posterior <- posterior / sum(posterior)
+  samples <- sample( p_grid , prob=posterior , size=1e4 , replace=TRUE)
+  PI99 <- PI( samples , 0.99 )
+  as.numeric( PI99[2] - PI99[1] )
+}
+
+f(20)
+```
+
+Now if you enter f(20), you get an interval width for 20 globe tosses. Now notice that the interval width varies across simulations. Try f(20) a few times to see what I mean. But as you increase N, this variation shrinks rapidly. This is because as the sample size increases, the differences between samples shrink. So if you ignore the sample to sample variation in interval width, that’s okay in this example. But in the code below, I’ll account for it.
+Now we need to run simulations across a bunch of different sample size to find where the interval shrinks to 0.05 in width. I’ll use sapply to run 100 simulations at each of 7 sample sizes:
+
+```{r}
+Nlist <- c( 20 , 50 , 100 , 200 , 500 , 1000 , 2000 )
+Nlist <- rep( Nlist , each=100 )
+width <- sapply( Nlist , f )
+plot( Nlist , width )
+abline( h=0.05 , col="red" )
+```
+
+
+
+```{r}
+#2M1.Compute and plot the grid approximate posterior distribution for each of the following sets of observations. In each case, assume a uniform prior for p.
+#create a function to calculate the likelihood
+likelihood_p <- function(count, size, p){
+  return(dbinom(x=count, size=size, prob=p))
+} #likelihood of p given the data
+# the posterior is:
+# P(p|n,w) = P(w|n,p)p(p)/(p(w))
+p_grid <- seq( from=0 , to=1 , length.out=100 ) #possible proporiton of water
+
+#(1) W,W,W
+posterior1 <- likelihood_p(count=3, size= 3, p_grid)*1  #3 waters, 3 tosses, possible proportion * uniform prior
+#(2) W,W,W,L
+posterior2 <- likelihood_p(count=3, size= 4, p_grid)*1  #3 waters, 4 tosses, possible proportion * uniform prior
+#(3) L,W,W,L,W,W,W
+posterior3 <- likelihood_p(count=5, size= 7, p_grid)*1  #5 waters, 7 tosses, possible proportion * uniform prior
+
+plot(p_grid, posterior1, type='l') #plot the approximate posterior
+lines(p_grid, posterior2, col='red') #plot the approximate posterior
+lines(p_grid, posterior3, col='blue') #plot the approximate posterior
+
+#2M2. Now assume a prior for p that is equal to zero when p < 0.5 and is a positive constant when p ≥ 0.5. Again compute and plot the grid approximate posterior distribution for each of the sets of observations in the problem just above.
+prior_p <-  ifelse( p_grid < 0.5 , 0 , 10)
+p_grid <- seq( from=0 , to=1 , length.out=100 ) #possible proporiton of water
+#(1) W,W,W
+posterior1 <- likelihood_p(count=3, size= 3, p_grid)*prior_p  #3 waters, 3 tosses, possible proportion * uniform prior
+#(2) W,W,W,L
+posterior2 <- likelihood_p(count=3, size= 4, p_grid)*prior_p #3 waters, 4 tosses, possible proportion * uniform prior
+#(3) L,W,W,L,W,W,W
+posterior3 <- likelihood_p(count=5, size= 7, p_grid)*prior_p  #5 waters, 7 tosses, possible proportion * uniform prior
+
+plot(p_grid, posterior1, type='l') #plot the approximate posterior
+lines(p_grid, posterior2, col='blue') #plot the approximate posterior
+lines(p_grid, posterior3, col='green') #plot the approximate posterior
+
+
+#2M3. Suppose there are two globes, one for Earth and one for Mars. The Earth globe is 70% covered in water. The Mars globe is 100% land. Further suppose that one of these globes—you don’t know which—was tossed in the air and produced a “land” observation. Assume that each globe was equally likely to be tossed. Show that the posterior probability that the globe was the Earth, conditional on seeing “land” (Pr(Earth|land)), is 0.23.
+
+prob_E <-  0.5 #probability the globe is earth
+prob_M <- 0.5  #probability the globe is mars
+
+E_land <- 0.3 #probability of land given the globe is earth p(land|earth)
+M_land <- 1.0 #probability of land given the globe is mars p(land|mars)
+
+prob_land <-  (E_land*prob_E) + (M_land * prob_M) #calcualte the probability of land
+# Pr(Earth|land)
+E_land*prob_E/prob_land #probability of earth land / average likelihood
+#[1] 0.2307692
+```
+#2M4. Suppose you have a deck with only three cards. Each card has two sides, and each side is either black or white. One card has two black sides. The second card has one black and one white side. The third card has two white sides. Now suppose all three cards are placed in a bag and shuffled. Someone reaches into the bag and pulls out a card and places it flat on a table. A black side is shown facing up, but you don’t know the color of the side facing down. Show that the probability that the other side is also black is 2/3. Use the counting method (Section 2 of the chapter) to approach this problem. This means counting up the ways that each card could produce the observed data (a black side facing up on the table).
+
+# possible outcomes |First side black | Second side black |
+# b1 -> b2          |         1     ` |       1           |
+# b2 -> b1          |         1       |       1           |
+# b1 -> w1          |         1       |       0           |
+# w1 -> b1          |         0       |       0           |
+# w1 -> w2          |         0       |       0           |
+# w2 -> w1          |         0       |       0           |
+2M5
+# b1 -> b2          |         1     ` |       1           |
+# b2 -> b1          |         1       |       1           |
+P(2Black|1Black) = P(1black|2black)*p(2black)/p(1black)
+Solve for after the =:
+The probability that the first side is black given that the card is black on both sides is 1.
+p(1black|2black) = 1
+P(2black) = 1/3 prob that card has black on both sides
+p(1black) = 1/2 - prob that one side is black - there are 3 possible ways of having black out of 6 possible ways
+result is (1*1/3)/1/2
+or 2/3
+Same for the 4/5
+
+#HARD - 
+Suppose there are two species of panda bear. Both are equally common in the wild and live in the same places. They look exactly alike and eat the same food, and there is yet no genetic assay capable of telling them apart. They differ however in their family sizes. Species A gives birth to twins 10% of the time, otherwise birthing a single infant. Species B births twins 20% of the time, otherwise birthing singleton infants. Assume these numbers are known with certainty, from many years of field research.
+Now suppose you are managing a captive panda breeding program. You have a new female panda of unknown species, and she has just given birth to twins. What is the probability that her next birth will also be twins?
+```{r}
+#2H2. Recall all the facts from the problem above. Now compute the probability that the panda we have is from species A, assuming we have observed only the first birth and that it was twins.
+p_A <-  0.5
+p_B <-  0.5
+p_twin_A <- 0.1
+p_twin_b <- 0.2
+# P(A|twins) = P(twins|A)P(A)/P(twins)
+# P(B|twins) = P(twins|B)P(B)/P(twins)
+# P(twins) = P(twins|A)P(A) + P(twins|B)P(B)
+# p_twins = p_twin_A * p_A + p_twin_b * p_B
+# p_A_twins = (p_twin_A * p_A)/p_twins
+# p_B_twins = (p_twin_b * p_B)/p_twins
+# p_A_twins
+# p_B_twins
+# 
+# p_twins_twins = 0.1 * p_A_twins + 0.2 * p_B_twins
+# p_twins_twins
+
+#P(Twins) = P(Twins|Species = A)P(A) + P(Twins|Species = B)P(B)
+p_A_twins = ( 0.1 * 0.5 ) / (( 0.1 * 0.5 ) + ( 0.2 * 0.5 ))
+p_A_twins
+
+#2H3
+# First birth = Twins
+# Second birth = Single
+# P(Species = A| Twins, Single)?
+# P(Species = A | Twins, Single) = P(Twins | Species = A) * [prob species A given that its twins]
+#                                   P(Single | Species = A) * [prob species A given that the second birth is single]
+#                                      P(A) / [prob that its species A]
+#                                         P(Twins,Single) [divided by prob that the birth is twins then singel]
+# P(Twins,Single) =  P(Twins | Species = A) *
+#                       P(Single | Species = A) *
+#                          P(A) +
+#                    P(Twins | Species = B) *
+#                       P(Single | Species = B) *
+#                          P(B)
+
+p_A_twins_single = ( 0.1 * 0.9 * 0.5) / 
+                      (( 0.1 * 0.9 * 0.5) + 
+                            ( 0.2 * 0.8 * 0.5 ))
+p_A_twins_single
+```
+2H4. A common boast of Bayesian statisticians is that Bayesian inference makes it easy to use all of the data, even if the data are of different types.
+So suppose now that a veterinarian comes along who has a new genetic test that she claims can identify the species of our mother panda. But the test, like all tests, is imperfect. This is the informa- tion you have about the test:
+• TheprobabilityitcorrectlyidentifiesaspeciesApandais0.8. • TheprobabilityitcorrectlyidentifiesaspeciesBpandais0.65.
+The vet administers the test to your panda and tells you that the test is positive for species A. First ignore your previous information from the births and compute the posterior probability that your panda is species A. Then redo your calculation, now using the birth data as well.
+```{r}
+p_test_A <- 0.8 * 0.5 + 0.35 * 0.5 # test positive * species A + 1-postive * species b
+p_test_A
+p_A_testA = (0.8 * 0.5) / p_test_A 
+p_A_testA
+
+# The individual probabilities are only conditional on
+# species being equal to A because otherwise they are
+# independent. A test = A does not depend on births, and
+# births should be independent.
+
+p_testA_twins_single = 0.8 * 0.1 * 0.9 * 0.5 +
+                        0.35 * 0.2 * 0.8 * 0.5
+
+p_A_testA_twins_single = (0.8 * 0.1 * 0.9 * 0.5) / p_testA_twins_single
+
+p_A_testA_twins_single
+
+evidence = factor(rep(c("prior", 
+                        "prior + twins", 
+                        "prior + twins + single", 
+                        "prior + twins + single + test = A"), 
+               each = 2), 
+               levels = c("prior", 
+                        "prior + twins", 
+                        "prior + twins + single", 
+                        "prior + twins + single + test = A"))
+species = rep(c("Species A", "Species B"), 4)
+prob = c(0.5, 0.5, 0.33, 0.67, 0.36, 0.64, 0.57, 0.43)
+change_df <- data.frame(species = species,
+                        evidence = evidence,
+                        prob = prob)
+ggplot(change_df, aes(x = evidence, 
+                      y = prob, 
+                      colour = species, 
+                      group = species)) +
+  geom_line() +
+  geom_point(size = 3) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5)) +
+  xlab("Data") +
+  ylab("Posterior Probability")
+```
